@@ -20,12 +20,31 @@
         stabilityChecks: 2,  // Number of checks before considering content stable (reduced)
         stabilityThreshold: 2000, // Time in ms to wait before considering content stable (reduced)
         stuckTimeout: 5000,  // Time to wait before considering the UI stuck
-        debugMode: true      // Set to true to enable console logging
+        debugMode: true,     // Set to true to enable console logging
+        maxContinues: 7      // Maximum number of continue attempts per session
     };
 
     // Keywords that suggest response is complete and we should NOT continue
     const completionKeywords = [
         "that covers everything",
+        "That covers everything",
+        "no additional",
+        "No additional",
+        "We are at an impasse",
+        "we are at an impasse",
+        "There is no more",
+        "there is no more",
+        "There is no further",
+        "there is no further",
+        "no further",
+        "We’ve provided the complete",
+        "we’ve provided the complete",
+        "We have reached",
+        "we have reached",
+        "There is no remaining",
+        "there is no remaining",
+        "no remaining",
+        "That concludes",
         "have addressed all",
         "have covered all",
         "is there anything else you'd like to know",
@@ -34,7 +53,21 @@
         "if you have any other questions",
         "hope this helps",
         "let me know if you need",
-        "feel free to ask"
+        "feel free to ask",
+        // Chinese completion keywords
+        "全文完",
+        "已完成全部",
+        "如果还有其他需求",
+        "已无更多",
+        "以上即为全",
+        "没有更多",
+        "完全结束",
+        "全部结束",
+        "全部内容",
+        "没有更多后续对话内容",
+        "所有内容",
+        "已全部完成",
+        "以上即为原文的完整"
     ];
 
     // Helper function for logging
@@ -55,6 +88,12 @@
         // Forcefully clear any existing preference to ensure OFF by default
         localStorage.removeItem('chatgpt-auto-continue');
         localStorage.setItem('chatgpt-auto-continue', 'false');
+        
+        // Initialize counter if it doesn't exist yet
+        if (!localStorage.getItem('chatgpt-auto-continue-count')) {
+            localStorage.setItem('chatgpt-auto-continue-count', '0');
+            log("Initialized continue counter to 0");
+        }
 
         // Create container
         const container = document.createElement('div');
@@ -88,6 +127,50 @@
         const label = document.createElement('div');
         label.textContent = 'Auto Continue';
         label.style.fontWeight = 'bold';
+
+        // Create max continuations input container
+        const maxContinuesContainer = document.createElement('div');
+        maxContinuesContainer.style.display = 'flex';
+        maxContinuesContainer.style.alignItems = 'center';
+        maxContinuesContainer.style.marginBottom = '5px';
+        maxContinuesContainer.style.width = '100%';
+        maxContinuesContainer.style.justifyContent = 'space-between';
+
+        const maxContinuesLabel = document.createElement('span');
+        maxContinuesLabel.textContent = 'Max Continues:';
+        maxContinuesLabel.style.fontSize = '12px';
+
+        const maxContinuesInput = document.createElement('input');
+        maxContinuesInput.type = 'number';
+        maxContinuesInput.id = 'auto-continue-max';
+        maxContinuesInput.min = '1';
+        maxContinuesInput.max = '100';
+        maxContinuesInput.step = '1';
+        maxContinuesInput.value = localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues;
+        maxContinuesInput.style.width = '45px';
+        maxContinuesInput.style.padding = '2px 5px';
+        maxContinuesInput.style.border = '1px solid #ccc';
+        maxContinuesInput.style.borderRadius = '4px';
+        maxContinuesInput.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+        maxContinuesInput.style.color = '#333';
+        maxContinuesInput.style.fontSize = '12px';
+
+        // Save max continuations when changed
+        maxContinuesInput.addEventListener('change', function() {
+            const value = parseInt(this.value, 10);
+            if (value < 1) this.value = 1;
+            if (value > 100) this.value = 100;
+            localStorage.setItem('chatgpt-auto-continue-max', this.value);
+            log(`Max continues set to ${this.value}`);
+            
+            // Update the display with the new max value
+            const maxContinues = parseInt(this.value, 10);
+            const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
+            document.getElementById('auto-continue-counter').textContent = `Continues: ${currentCount}/${maxContinues}`;
+        });
+
+        maxContinuesContainer.appendChild(maxContinuesLabel);
+        maxContinuesContainer.appendChild(maxContinuesInput);
 
         // Create switch
         const switchContainer = document.createElement('label');
@@ -136,6 +219,16 @@
         statusText.style.fontSize = '12px';
         statusText.style.marginTop = '2px';
 
+        // Create continues counter text
+        const continuesCounter = document.createElement('div');
+        continuesCounter.id = 'auto-continue-counter';
+        const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+        const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
+        continuesCounter.textContent = `Continues: ${currentCount}/${maxContinues}`;
+        continuesCounter.style.fontSize = '11px';
+        continuesCounter.style.marginTop = '2px';
+        continuesCounter.style.opacity = '0.8';
+
         // Assemble the toggle switch
         slider.appendChild(sliderBefore);
         switchContainer.appendChild(checkbox);
@@ -143,8 +236,10 @@
 
         // Add elements to container
         container.appendChild(label);
+        container.appendChild(maxContinuesContainer);
         container.appendChild(switchContainer);
         container.appendChild(statusText);
+        container.appendChild(continuesCounter);
 
         // Add container to body
         document.body.appendChild(container);
@@ -156,11 +251,13 @@
                 sliderBefore.style.transform = 'translateX(22px)';
                 statusText.textContent = 'Active';
                 container.style.backgroundColor = 'rgba(25, 195, 125, 0.9)'; // Green container
+                maxContinuesInput.disabled = true; // Disable max continues input when active
             } else {
                 slider.style.backgroundColor = '#ccc'; // Gray slider
                 sliderBefore.style.transform = 'translateX(0)';
                 statusText.textContent = 'Inactive';
                 container.style.backgroundColor = 'rgba(100, 100, 100, 0.9)'; // Gray container
+                maxContinuesInput.disabled = false; // Enable max continues input when inactive
             }
         }
 
@@ -170,8 +267,16 @@
             updateSliderStyle();
             log(`Auto Continue ${this.checked ? 'enabled' : 'disabled'}`);
 
-            // Restart monitoring if enabled
+            // Reset continues counter when toggling on
             if (this.checked) {
+                // Reset the counter in the UI
+                const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+                document.getElementById('auto-continue-counter').textContent = `Continues: 0/${maxContinues}`;
+                
+                // Also reset the counter in localStorage
+                localStorage.setItem('chatgpt-auto-continue-count', '0');
+                
+                // Restart monitoring
                 startMonitoring();
                 log("Restarted monitoring");
             }
@@ -437,7 +542,6 @@
             const sendButtonSelectors = [
                 'button[data-testid="send-button"]',
                 'button.absolute.p-1',
-                'button.absolute.rounded-md',
                 'button[type="submit"]',
                 'form button:last-of-type'
             ];
@@ -679,6 +783,29 @@
         updateStatus("Sending continue...");
 
         try {
+            // Check if o1-pro is processing - if so, don't even try to send
+            if (isO1ProProcessing()) {
+                log("Cannot send continue - o1-pro is still processing");
+                updateStatus("O1 processing, wait");
+                return false;
+            }
+            
+            // First, increment the counter BEFORE sending the continue
+            // This ensures the counter is updated regardless of async timing issues
+            const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
+            const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+            
+            // Increment the counter and save to localStorage IMMEDIATELY
+            const newCount = currentCount + 1;
+            localStorage.setItem('chatgpt-auto-continue-count', newCount.toString());
+            
+            // Update the UI
+            const continueCounter = document.getElementById('auto-continue-counter');
+            if (continueCounter) {
+                continueCounter.textContent = `Continues: ${newCount}/${maxContinues}`;
+                log(`Updated continue counter: ${newCount}/${maxContinues}`);
+            }
+            
             // Find the input field by trying multiple approaches
             const inputFieldOptions = [
                 document.querySelector('#prompt-textarea'),
@@ -702,7 +829,7 @@
             if (!inputField) {
                 log("No input field found");
                 updateStatus("No input field found");
-                return;
+                return false;
             }
 
             log(`Found input field: ${inputField.tagName || 'contenteditable'}`);
@@ -733,6 +860,9 @@
 
             // Give focus to the field
             inputField.focus();
+
+            // Variable to track if we successfully sent the continue
+            let continueSent = false;
 
             // SHORT DELAY then find and click the send button
             setTimeout(() => {
@@ -798,77 +928,38 @@
                     }
                 }
 
-                // If we found a button, click it
-                if (sendButton) {
-                    log(`Found send button (${sendButton.textContent || 'icon button'}), clicking`);
-
-                    try {
-                        // Click the button
-                        sendButton.click();
-                        log("Button clicked directly");
-                        updateStatus("Continue sent");
-                    } catch (clickErr) {
-                        log(`Direct click failed: ${clickErr}`);
-
-                        // Try alternative click methods
-                        try {
-                            sendButton.dispatchEvent(new MouseEvent('click', {
-                                bubbles: true,
-                                cancelable: true,
-                                view: window
-                            }));
-                            log("Button clicked with MouseEvent");
-                        } catch (mouseErr) {
-                            log(`MouseEvent failed: ${mouseErr}`);
-
-                            // Try submitting the parent form directly
-                            const form = sendButton.closest('form');
-                            if (form) {
-                                try {
-                                    form.dispatchEvent(new Event('submit', { bubbles: true }));
-                                    log("Form submitted directly");
-                                } catch (formErr) {
-                                    log(`Form submission failed: ${formErr}`);
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // If no button found, try press Enter in the input field
-                    log("No button found, trying Enter key");
-
-                    // Send Enter key event
-                    try {
-                        inputField.dispatchEvent(new KeyboardEvent('keydown', {
-                            key: 'Enter',
-                            code: 'Enter',
-                            keyCode: 13,
-                            which: 13,
-                            bubbles: true
-                        }));
-                        log("Enter key sent");
-                        updateStatus("Used Enter key");
-                    } catch (keyErr) {
-                        log(`Enter key failed: ${keyErr}`);
-                        updateStatus("Failed to send");
-                    }
+                if (!sendButton) {
+                    log("No send button found");
+                    updateStatus("No send button found");
+                    continueSent = false;
+                    return;
                 }
 
-                // Reset message after send attempt (successful or not)
-                setTimeout(() => {
-                    updateStatus("Monitoring...");
-                }, 3000);
+                log(`Found send button: ${sendButton.textContent || 'icon button'}`);
 
-            }, 300); // Use a short delay before clicking
+                // Click the button
+                sendButton.click();
+                log("Clicked send button");
+                continueSent = true;
+                
+                // Set a flag to indicate we just sent a continue and need to wait
+                window._waitingAfterContinue = true;
+                updateStatus("Waiting for response...");
+                
+                // After 5 seconds, clear the waiting flag
+                setTimeout(() => {
+                    window._waitingAfterContinue = false;
+                    log("5-second minimum wait completed");
+                }, 5000);
+                
+            }, 100); // Short delay before clicking send
+
+            return true; // Indicate we initiated the continue process
 
         } catch (e) {
-            log(`Error in sendContinue: ${e.message}`);
+            log(`Error sending continue: ${e.message}`);
             updateStatus("Error sending continue");
-
-            // Reset message after error
-            setTimeout(() => {
-                updateStatus("Monitoring...");
-            }, 3000);
+            return false;
         }
     }
 
@@ -903,9 +994,21 @@
                 // Get current time for calculations
                 const currentTime = Date.now();
 
+                // Check if we're in the waiting period after sending a continue
+                if (window._waitingAfterContinue) {
+                    updateStatus("Waiting for response...");
+                    return;
+                }
+
                 // Rate limit continue attempts (max 1 every 10 seconds)
                 if (currentTime - lastContinueTime < 10000 && continueAttempts > 0) {
                     updateStatus(`Cooling down (${Math.round((10000 - (currentTime - lastContinueTime)) / 1000)}s)`);
+                    return;
+                }
+
+                // Check if o1-pro is processing - if so, don't even try to continue
+                if (isO1ProProcessing()) {
+                    updateStatus("O1 processing, wait");
                     return;
                 }
 
@@ -958,30 +1061,60 @@
                         return;
                     }
 
+                    // Check if we've reached the maximum number of continuations
+                    const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+                    const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
+                    if (currentCount >= maxContinues) {
+                        updateStatus(`Max continues (${maxContinues}) reached`);
+                        return;
+                    }
+
                     // We've met all criteria - send continue command
                     log("All conditions met for continuing message");
                     updateStatus("Continuing...");
 
-                    // Send the continue command
-                    sendContinueCommandSimple();
-
-                    // Update tracking variables
-                    lastContinueTime = currentTime;
-                    continueAttempts++;
-                    stableCount = 0;
+                    // Send the continue command and only proceed if it was successful
+                    const continueSuccess = sendContinueCommandSimple();
+                    
+                    // Only update tracking variables if we actually sent the message
+                    if (continueSuccess) {
+                        lastContinueTime = currentTime;
+                        continueAttempts++;
+                        stableCount = 0;
+                        
+                        // Note: Counter is now updated directly in sendContinueCommandSimple
+                        // No need to update it here to avoid double-counting
+                    } else {
+                        log("Continue command failed to send");
+                        // Don't reset stableCount so we can try again on next iteration
+                    }
                     return;
                 }
 
                 // Alternative way to detect when to continue: if content has been stable
                 // for a long time (10 seconds), try continuing regardless
                 if (contentStable && (currentTime - lastMessageTime > 10000)) {
+                    const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+                    const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
                     if (shouldContinueMessage(currentContent)) {
+                        if (currentCount >= maxContinues) {
+                            updateStatus(`Max continues (${maxContinues}) reached`);
+                            return;
+                        }
+                        
                         log("Content stable for 10+ seconds, attempting continue");
                         updateStatus("Long stable, continuing...");
-                        sendContinueCommandSimple();
-                        lastContinueTime = currentTime;
-                        continueAttempts++;
-                        stableCount = 0;
+                        const continueSuccess = sendContinueCommandSimple();
+                        
+                        // Only update tracking variables if we actually sent the message
+                        if (continueSuccess) {
+                            lastContinueTime = currentTime;
+                            continueAttempts++;
+                            stableCount = 0;
+                        } else {
+                            log("Continue command failed to send");
+                            // Don't reset stableCount so we can try again on next iteration
+                        }
                     } else {
                         updateStatus("Message appears complete");
                     }
@@ -1047,6 +1180,127 @@
         });
 
         log("Mutation observer set up");
+    }
+
+    // Function to check if o1-pro mode is processing
+    function isO1ProProcessing() {
+        try {
+            log("Checking for o1-pro processing");
+            
+            // First, find the last assistant message to limit our search scope
+            const lastMessage = findLastAssistantMessage();
+            if (!lastMessage) {
+                log("No last message found to check for o1-pro processing");
+                return false;
+            }
+            
+            // Helper function to search within the last message and its parent article
+            const findInLastMessageArea = (selector) => {
+                // First try direct children of the message
+                let elements = Array.from(lastMessage.querySelectorAll(selector));
+                
+                // If not found, check the parent article which contains the full "turn"
+                if (elements.length === 0) {
+                    const parentArticle = lastMessage.closest('article');
+                    if (parentArticle) {
+                        elements = Array.from(parentArticle.querySelectorAll(selector));
+                    }
+                }
+                
+                // If still not found, try the entire document (for cases where the UI structure changes)
+                if (elements.length === 0) {
+                    elements = Array.from(document.querySelectorAll(selector));
+                }
+                
+                // Filter to only visible elements
+                return elements.filter(el => el.offsetParent !== null);
+            };
+
+            // Reset the O1 Pro status if no containers are found or if we have restarted
+            if (!window._lastO1Check || Date.now() - window._lastO1Check > 60000) {
+                window._o1ProProgressBarLastSeen = null;
+                log("Resetting O1 Pro status due to long period without checks");
+            }
+            window._lastO1Check = Date.now();
+
+            // Find all o1 pro mode containers
+            const containers = findInLastMessageArea('.inline-flex.flex-col.items-start.justify-start.rounded-2xl');
+            
+            log(`Found ${containers.length} potential o1-pro containers`);
+            
+            // No containers means no O1 Pro processing
+            if (containers.length === 0) {
+                window._o1ProProgressBarLastSeen = null; // Reset waiting state
+                return false;
+            }
+            
+            // Check for active indicators - a progress bar OR a Details button
+            let foundActiveProgressBar = false;
+            let foundActiveDetailsButton = false;
+            let foundO1ProContainer = false;
+            
+            for (const container of containers) {
+                // First, check if this is an O1 Pro container by looking for the header text
+                const headerText = container.querySelector('.text-token-text-primary')?.textContent?.trim() ||
+                                  container.querySelector('.font-medium')?.textContent?.trim() ||
+                                  container.querySelector('.text-token-text-secondary')?.textContent?.trim();
+                
+                if (headerText === 'Request for o1 pro mode') {
+                    foundO1ProContainer = true;
+                    log("Found o1-pro container with header text");
+                    
+                    // Look for the progress bar container with specific height
+                    const progressBarContainer = container.querySelector('div[style*="height: 8px"]');
+                    
+                    // If we find a progress bar, it means processing is still ongoing
+                    if (progressBarContainer) {
+                        log("Found active o1-pro mode progress bar");
+                        // Reset the timestamp when progress bar disappears
+                        window._o1ProProgressBarLastSeen = Date.now();
+                        foundActiveProgressBar = true;
+                        
+                        // Exit early - we found an active progress bar
+                        return true;
+                    }
+                    
+                    // If no progress bar but has Details button, still processing
+                    const detailsButton = container.querySelector('button');
+                    if (detailsButton && detailsButton.textContent?.trim() === 'Details') {
+                        log("Found 'Details' button in o1-pro component");
+                        foundActiveDetailsButton = true;
+                        
+                        // Exit early - we found an active Details button
+                        return true;
+                    }
+                }
+            }
+            
+            // If we found an O1 Pro container but no active indicators
+            if (foundO1ProContainer && !foundActiveProgressBar && !foundActiveDetailsButton) {
+                // Check if we were previously in a waiting period after a progress bar disappeared
+                if (window._o1ProProgressBarLastSeen) {
+                    // Check if it's been less than 10 seconds since the progress bar disappeared
+                    const timeSinceProgressBarDisappeared = Date.now() - window._o1ProProgressBarLastSeen;
+                    if (timeSinceProgressBarDisappeared < 10000) {
+                        log(`Waiting for o1-pro content to finish (${Math.round((10000 - timeSinceProgressBarDisappeared) / 1000)}s remaining)`);
+                        return true; // Still treat as processing during the waiting period
+                    }
+                    
+                    // If it's been more than 10 seconds, reset the timestamp and allow continuing
+                    log("10-second wait after o1-pro progress bar disappeared completed");
+                    window._o1ProProgressBarLastSeen = null;
+                }
+            } else if (!foundO1ProContainer) {
+                // If no O1 Pro containers found at all, reset any waiting state
+                window._o1ProProgressBarLastSeen = null;
+            }
+            
+            log("No active o1-pro processing indicators found");
+            return false;
+        } catch (e) {
+            log(`Error checking o1-pro mode: ${e.message}`);
+            return false; // Default to not in o1-pro mode on error
+        }
     }
 
     // Initialize when the page is loaded
