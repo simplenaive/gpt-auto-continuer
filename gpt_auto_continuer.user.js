@@ -68,6 +68,7 @@
         "所有内容",
         "已全部",
         "已全部完成",
+        "已完成全部",
         "以上即为原文的完整"
     ];
 
@@ -496,7 +497,7 @@
         }
     }
 
-    // Function to check if ChatGPT is ready to receive new input
+    // Enhanced function to check if ChatGPT is ready to receive new input
     function isChatGPTReady() {
         try {
             // MOST IMPORTANT CHECK: Is the input field enabled? If yes, system is likely ready
@@ -572,209 +573,282 @@
         }
     }
 
-    // Improved function to find the last message from the assistant
+    // Enhanced function to find the last assistant message component
     function findLastAssistantMessage() {
-        try {
-            // Try multiple selector approaches in order of specificity
-
-            // Store all potential message containers
-            const potentialMessages = [];
-
-            // 1. By data attribute (most specific)
-            const byRole = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
-            if (byRole && byRole.length > 0) {
-                // Get the most recent visible one
-                const visibleMessages = byRole.filter(el => el.offsetParent !== null);
-                if (visibleMessages.length > 0) {
-                    log(`Found ${visibleMessages.length} visible messages by role`);
-                    potentialMessages.push(visibleMessages[visibleMessages.length - 1]);
-                }
-            }
-
-            // 2. By markdown prose class
-            const markdown = Array.from(document.querySelectorAll('.markdown.prose'));
-            if (markdown && markdown.length > 0) {
-                const visibleMarkdown = markdown.filter(el => el.offsetParent !== null);
-                if (visibleMarkdown.length > 0) {
-                    log(`Found ${visibleMarkdown.length} visible markdown elements`);
-                    potentialMessages.push(visibleMarkdown[visibleMarkdown.length - 1]);
-                }
-            }
-
-            // 3. By message class patterns (common in new UI)
-            const messagePatterns = [
-                '.text-base.my-auto.mx-auto',
-                '.text-message',
-                '.message-content',
-                '.break-words',
-                '.assistant-message',
-                '.chat-message[data-message-id]',
-                '.prose'
-            ];
-
-            for (const pattern of messagePatterns) {
-                const elements = Array.from(document.querySelectorAll(pattern));
-                const visibleElements = elements.filter(el => el.offsetParent !== null);
-                if (visibleElements.length > 0) {
-                    log(`Found ${visibleElements.length} visible elements with pattern ${pattern}`);
-                    potentialMessages.push(visibleElements[visibleElements.length - 1]);
-                }
-            }
-
-            // 4. By article elements
-            const articles = Array.from(document.querySelectorAll('article'));
-            if (articles && articles.length > 0) {
-                const visibleArticles = articles.filter(el => el.offsetParent !== null);
-                if (visibleArticles.length > 0) {
-                    log(`Found ${visibleArticles.length} visible articles`);
-                    // Look for the articles in the main content area
-                    const mainArticles = visibleArticles.filter(el => {
-                        const rect = el.getBoundingClientRect();
-                        // Typically in the middle of the screen
-                        return rect.left > 100 && rect.right < window.innerWidth - 100;
-                    });
-
-                    if (mainArticles.length > 0) {
-                        potentialMessages.push(mainArticles[mainArticles.length - 1]);
-                    } else {
-                        potentialMessages.push(visibleArticles[visibleArticles.length - 1]);
+        if (config.debugMode) {
+            console.log("Looking for last assistant message...");
+        }
+        
+        // Various selectors to try for finding the message content
+        const contentSelectors = [
+            '[data-message-author-role="assistant"]:last-child',
+            '[data-message-author-role="assistant"]:last-of-type',
+            'div[data-testid="conversation-turn"]:last-child div[data-message-author-role="assistant"]',
+            'div.agent-turn:last-child',
+            'div.markdown:last-child',
+            '.prose:last-child',
+            'article:last-child .prose',
+            'div[data-testid="conversation-turn-3"] div[data-message-author-role="assistant"]', // Specific pattern seen in the UI
+            'div[data-message-author-role="assistant"]'
+        ];
+        
+        const potentialMessages = [];
+        
+        // First, try the most reliable method - messages by role
+        const byRole = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
+        
+        if (byRole.length > 0) {
+            log(`Found ${byRole.length} messages by role attribute`);
+            
+            // Filter for visible messages with content
+            const visibleMessages = Array.from(byRole).filter(el => 
+                el && el.offsetParent !== null && el.textContent.trim().length > 0
+            );
+            
+            if (visibleMessages.length > 0) {
+                log(`Found ${visibleMessages.length} visible messages by role`);
+                // Get the last visible assistant message
+                const lastAssistantMessage = visibleMessages[visibleMessages.length - 1];
+                
+                // Make sure it's actually an assistant message by checking it's not inside a user message container
+                if (lastAssistantMessage.closest('[data-message-author-role="user"]')) {
+                    log('Last message appears to be inside a user message container - marking as user message');
+                    lastAssistantMessage._possibleUserMessage = true;
+                } else if (lastAssistantMessage.parentElement && 
+                           lastAssistantMessage.parentElement.closest('[data-message-author-role="user"]')) {
+                    log('Last message has a parent inside a user message container - marking as user message');
+                    lastAssistantMessage._possibleUserMessage = true;
+                } else {
+                    // Additional check: look at the conversation turn container
+                    const conversationTurn = lastAssistantMessage.closest('[data-testid^="conversation-turn"]');
+                    if (conversationTurn) {
+                        // Check if this turn has a "You said:" label
+                        const turnLabel = conversationTurn.querySelector('h5.sr-only');
+                        if (turnLabel && turnLabel.textContent.includes('You said')) {
+                            log('Found "You said" label in the conversation turn - marking as user message');
+                            lastAssistantMessage._possibleUserMessage = true;
+                        }
                     }
                 }
+                
+                potentialMessages.push(lastAssistantMessage);
             }
-
-            // 5. Fallback: any substantial text content
-            const allDivs = Array.from(document.querySelectorAll('div'));
-            const contentDivs = allDivs.filter(div => {
-                const text = div.textContent || '';
-                // Must be visible and have substantial text
-                return text.length > 100 && div.offsetParent !== null;
-            });
-
-            if (contentDivs.length > 0) {
-                log(`Found ${contentDivs.length} content-rich divs`);
-                // Sort by most likely to be the latest message (bottom of page)
-                contentDivs.sort((a, b) => {
-                    const rectA = a.getBoundingClientRect();
-                    const rectB = b.getBoundingClientRect();
-                    return rectB.bottom - rectA.bottom;
-                });
-                potentialMessages.push(contentDivs[0]);
-            }
-
-            // Find the most likely candidate by checking content and position
-            if (potentialMessages.length > 0) {
-                // First check: recent message should be near the bottom
-                potentialMessages.sort((a, b) => {
-                    const rectA = a.getBoundingClientRect();
-                    const rectB = b.getBoundingClientRect();
-
-                    // Prioritize elements closer to the bottom
-                    return rectB.bottom - rectA.bottom;
-                });
-
-                // Second check: content should be substantial
-                const substantial = potentialMessages.filter(el =>
-                    (el.textContent || '').length > 50
-                );
-
-                if (substantial.length > 0) {
-                    log("Found substantial message content");
-                    return substantial[0];
-                }
-
-                log("Using best position-based candidate");
-                return potentialMessages[0];
-            }
-
-            log("No message found by any method");
-            return null;
-        } catch (e) {
-            log(`Error finding message: ${e.message}`);
-            return null;
         }
+        
+        // Try each selector
+        for (const selector of contentSelectors) {
+            const elements = document.querySelectorAll(selector);
+            const visibleElements = Array.from(elements).filter(el => 
+                el && el.offsetParent !== null && el.textContent.trim().length > 0
+            );
+            
+            if (visibleElements.length > 0) {
+                log(`Found ${visibleElements.length} visible elements with selector: ${selector}`);
+                
+                // Check each element to see if it's actually a user message
+                for (const element of visibleElements) {
+                    // Check if this element or any of its parents has the user role attribute
+                    if (element.closest('[data-message-author-role="user"]')) {
+                        log(`Element with selector ${selector} is inside a user message - skipping`);
+                        element._possibleUserMessage = true;
+                    } 
+                    // Check if the element contains the "You said:" text which indicates it's a user message
+                    else if (element.querySelector('h5.sr-only') && 
+                             element.querySelector('h5.sr-only').textContent.includes('You said')) {
+                        log(`Element with selector ${selector} contains 'You said' label - marking as user message`);
+                        element._possibleUserMessage = true;
+                    }
+                    potentialMessages.push(element);
+                }
+            }
+        }
+        
+        // Get the most likely message component
+        if (potentialMessages.length > 0) {
+            // First try to find the most recent assistant message (not a user message)
+            const assistantMessages = potentialMessages.filter(el => !el._possibleUserMessage);
+            if (assistantMessages.length > 0) {
+                log(`Using the last assistant message from ${assistantMessages.length} potential messages`);
+                return assistantMessages[assistantMessages.length - 1];
+            }
+            
+            // If all are marked as user messages, still return the last one but it will be flagged
+            log(`All potential messages are marked as user messages, using last one anyway`);
+            return potentialMessages[potentialMessages.length - 1];
+        }
+        
+        // Fall back to the last message in the document
+        const allMessages = document.querySelectorAll('[role="region"] .markdown');
+        if (allMessages.length > 0) {
+            const lastMessage = allMessages[allMessages.length - 1];
+            
+            // Check if this is likely a user message
+            if (lastMessage.closest('[data-message-author-role="user"]')) {
+                log('Last fallback message is inside a user message - marking as user message');
+                lastMessage._possibleUserMessage = true;
+            }
+            
+            return lastMessage;
+        }
+        
+        log("No assistant message found using any method");
+        return null;
+    }
+
+    // Helper function to get the most informative element from a list
+    function getMostInformativeElement(elements) {
+        if (!elements || elements.length === 0) return null;
+        
+        // Prioritize elements based on their content and structure
+        const scoredElements = elements.map(el => {
+            let score = 0;
+            
+            // Prefer elements with more text content
+            score += el.textContent.trim().length;
+            
+            // Prefer elements with reasonable complexity (not too many child elements)
+            const childCount = el.querySelectorAll('*').length;
+            if (childCount > 5 && childCount < 50) score += 10;
+            
+            // Prefer elements that likely contain Chinese text
+            if (/[\u4e00-\u9fa5]/.test(el.textContent)) score += 100;
+            
+            // Deprioritize elements that look like UI components
+            if (el.querySelector('button, input, select')) score -= 50;
+            if (el.closest('nav, header, footer, .sidebar')) score -= 100;
+            
+            return { element: el, score };
+        });
+        
+        // Sort by score (highest first)
+        scoredElements.sort((a, b) => b.score - a.score);
+        
+        return scoredElements[0].element;
     }
 
     // Enhanced function to check if we should continue based on message content
     function shouldContinueMessage(messageText) {
-        if (!messageText || messageText.length < 50) {
-            log("Message too short to continue");
-            return false;
+        // Safety check
+        if (!messageText) return false;
+        
+        // If the message is potentially a user message (marked by findLastAssistantMessage),
+        // we should always continue since we don't want to apply completion checks to user messages
+        const lastMessage = findLastAssistantMessage();
+        if (lastMessage && lastMessage._possibleUserMessage) {
+            log("Detected as possibly a user message - ignoring completion checks");
+            return true; // Always continue for user messages
         }
-
-        // Check for completion indicators
-        for (const keyword of completionKeywords) {
-            if (messageText.toLowerCase().includes(keyword.toLowerCase())) {
+        
+        if (config.debugMode) {
+            console.log("===== Message Content Debugging =====");
+            console.log(`Raw message content (${messageText.length} chars): ${messageText}`);
+            
+            // Debug logging for Chinese phrases
+            for (const phrase of ['已完成全部', '已全部完成', '已全部']) {
+                console.log(`Contains '${phrase}': ${messageText.includes(phrase)}`);
+                console.log(`Phrase '${phrase}' code points:`, [...phrase].map(char => char.codePointAt(0).toString(16)));
+            }
+        }
+        
+        // Check for specific patterns that indicate more content will follow
+        // If ChatGPT is continuing a list or code, we should continue automatically
+        const continuationPatterns = [
+            /^\d+\s*[).\-]/,        // Numbered list item
+            /^\s*[-*u2022]\s+/,        // Bullet point
+            /^\s*\|.*\|\s*$/,      // Markdown table row
+            /^\s*```/,              // Code block
+            /^\s*}/                 // Closing brace (likely in code)
+        ];
+        
+        // Check the last non-whitespace line of the message for continuation patterns
+        const lines = messageText.split('\n');
+        const lastNonEmptyLine = lines.filter(line => line.trim().length > 0).pop() || '';
+        const startsWithListItem = continuationPatterns.some(pattern => pattern.test(lastNonEmptyLine));
+        
+        if (startsWithListItem) {
+            log(`Detected continuation pattern in last line: "${lastNonEmptyLine.substring(0, 30)}..."`);  
+            return true;
+        }
+        
+        // Extract any code blocks to check them separately
+        let codeBlocks = messageText.match(/```[\s\S]*?```/g) || [];
+        
+        // Check if the last code block is incomplete (no closing ```)
+        const lastCodeBlockStart = messageText.lastIndexOf('```');
+        if (lastCodeBlockStart > -1 && messageText.indexOf('```', lastCodeBlockStart + 3) === -1) {
+            log('Detected incomplete code block, should continue');
+            return true;
+        }
+        
+        // Check for specific keywords that indicate the message is complete
+        // First, get all Chinese completion keywords (they need special handling)
+        const chineseKeywords = completionKeywords.filter(keyword => /[\u4e00-\u9fa5]/.test(keyword));
+        log(`Using ${chineseKeywords.length} Chinese completion keywords`);
+        
+        // Check Chinese keywords (without toLowerCase since case doesn't apply to Chinese)
+        for (const keyword of chineseKeywords) {
+            if (messageText.includes(keyword)) {
+                log(`Found Chinese completion keyword: "${keyword}"`);
+                return false;
+            }
+        }
+        
+        // Check every non-Chinese keyword (with toLowerCase for case insensitivity)
+        const lowerMessage = messageText.toLowerCase();
+        const nonChineseKeywords = completionKeywords.filter(keyword => !/[\u4e00-\u9fa5]/.test(keyword));
+        
+        for (const keyword of nonChineseKeywords) {
+            if (lowerMessage.includes(keyword.toLowerCase())) {
                 log(`Found completion keyword: "${keyword}"`);
                 return false;
             }
         }
-
-        // Additional checks: Look for incomplete sentences at the end
-        const lastChar = messageText.trim().slice(-1);
-        const endsWithPunctuation = ['.', '!', '?', ':', ';'].includes(lastChar);
-
-        // Check for signs of truncation
-        const hasTruncationSigns = messageText.endsWith('...') ||
-            messageText.endsWith('…') ||
-            messageText.toLowerCase().endsWith('continued') ||
-            messageText.toLowerCase().endsWith('to be continued');
-
-        if (hasTruncationSigns) {
-            log("Message appears truncated, should continue");
-            return true;
-        }
-
-        // If it ends with punctuation and doesn't have signs of truncation
-        if (endsWithPunctuation) {
-            // Additional check: if the message ends with a complete paragraph, it might be complete
-            const paragraphs = messageText.split('\n\n');
-            const lastParagraph = paragraphs[paragraphs.length - 1].trim();
-
-            // If the last paragraph is very short, it might be a conclusion
-            if (lastParagraph.length < 50 && endsWithPunctuation) {
-                log("Message ends with a short, complete paragraph - might be complete");
-                return false;
+        
+        // Enhanced check for possible completion phrases in content elements
+        try {
+            const lastMessage = findLastAssistantMessage();
+            if (lastMessage) {
+                // Check paragraph elements which might contain conclusion phrases
+                const possibleContentElements = lastMessage.querySelectorAll('p, li, div');
+                const visibleParagraphs = Array.from(possibleContentElements).filter(el => 
+                    el.offsetParent !== null && 
+                    el.textContent.trim().length > 0 &&
+                    !el.closest('div[data-message-author-role="user"]') // Make sure we're not checking user messages
+                );
+                
+                if (visibleParagraphs.length > 0) {
+                    // Check the last few paragraphs for completion phrases
+                    const paragraphsToCheck = visibleParagraphs.slice(-3); // Check last 3 paragraphs
+                    
+                    for (const paragraph of paragraphsToCheck) {
+                        const paragraphText = paragraph.textContent.trim();
+                        
+                        // Check Chinese keywords in paragraphs
+                        for (const keyword of chineseKeywords) {
+                            if (paragraphText.includes(keyword)) {
+                                log(`Found Chinese completion keyword in paragraph: "${keyword}"`);
+                                return false;
+                            }
+                        }
+                        
+                        // Check non-Chinese keywords in paragraphs
+                        const lowerParagraph = paragraphText.toLowerCase();
+                        for (const keyword of nonChineseKeywords) {
+                            if (lowerParagraph.includes(keyword.toLowerCase())) {
+                                log(`Found completion keyword in paragraph: "${keyword}"`);
+                                return false;
+                            }
+                        }
+                    }
+                }
             }
-
-            // Check if message ends with code block
-            if (messageText.endsWith('```') || messageText.includes('```\n\n')) {
-                log("Message ends with completed code block");
-                return false;
-            }
-        } else {
-            // If it doesn't end with punctuation, it's likely incomplete
-            log("Message doesn't end with punctuation, likely incomplete");
-            return true;
+        } catch (e) {
+            log(`Error checking paragraphs: ${e.message}`);
+            // Continue despite error
         }
-
-        // Check for partial lists or bullet points
-        const lines = messageText.split('\n');
-        const lastFewLines = lines.slice(-3);
-
-        // Look for patterns like numbered lists or bullet points
-        const listPatterns = lastFewLines.filter(line =>
-            /^\s*\d+\./.test(line) || // Numbered list
-            /^\s*[\-\*\•]/.test(line)  // Bullet points
-        );
-
-        if (listPatterns.length > 0) {
-            log("Message appears to end with a list item, likely incomplete");
-            return true;
-        }
-
-        // Look for patterns suggesting a new section was about to start
-        const sectionHeaders = lastFewLines.filter(line =>
-            /^#+\s/.test(line) || // Markdown headers
-            /^[A-Z][^.!?]*:$/.test(line) // Title with colon
-        );
-
-        if (sectionHeaders.length > 0 && sectionHeaders[0] === lastFewLines[lastFewLines.length - 1]) {
-            log("Message ends with a section header, likely incomplete");
-            return true;
-        }
-
-        // Default to continuing if in doubt
-        log("No clear completion signals, defaulting to continue");
+        
+        // If we get to here, the message doesn't appear to be complete yet
+        log("No completion markers found, message should continue");
         return true;
     }
 
@@ -967,8 +1041,7 @@
     // Main monitoring function - simplified and more robust
     function startMonitoring() {
         log("Starting simplified monitor for responses");
-
-        // Clear any existing intervals to avoid duplicates
+        
         if (window._autoContinueInterval) {
             clearInterval(window._autoContinueInterval);
         }
@@ -1008,9 +1081,14 @@
                 }
 
                 // Check if o1-pro is processing - if so, don't even try to continue
-                if (isO1ProProcessing()) {
-                    updateStatus("O1 processing, wait");
-                    return;
+                try {
+                    if (isO1ProProcessing()) {
+                        updateStatus("O1 processing, wait");
+                        return;
+                    }
+                } catch (error) {
+                    log(`Error checking o1-pro mode: ${error.message}`);
+                    // Continue execution despite the error
                 }
 
                 // SIMPLIFIED APPROACH:
@@ -1020,91 +1098,84 @@
                 // 4. If conditions are met, continue
 
                 // Step 1: Find the last message
-                const lastMessage = findLastAssistantMessage();
-                if (!lastMessage) {
-                    updateStatus("No message found");
-                    return;
-                }
-
-                // Step 2: Get current content and check stability
-                const currentContent = lastMessage.textContent || '';
-
-                // Skip if content is too short
-                if (currentContent.length < 50) {
-                    updateStatus("Message too short");
-                    return;
-                }
-
-                // Check if content has changed
-                if (currentContent !== lastMessageContent) {
-                    log("Content changed, resetting stability counter");
-                    lastMessageContent = currentContent;
-                    lastMessageTime = currentTime;
-                    stableCount = 0;
-                    return;
-                }
-
-                // Content is unchanged, increment stability counter
-                stableCount++;
-
-                // Update status to show we're checking stability
-                updateStatus(`Content stable (${stableCount}/3)`);
-
-                // Step 3: Check if content is stable for enough time AND input is enabled
-                const contentStable = stableCount >= 3;
-                const inputEnabled = !isInputDisabled();
-
-                // If input is enabled and content has been stable, we can consider continuing
-                if (inputEnabled && contentStable) {
-                    // Step 4: Check if we should continue this message
-                    if (!shouldContinueMessage(currentContent)) {
-                        updateStatus("Message complete");
+                try {
+                    const lastMessage = findLastAssistantMessage();
+                    if (!lastMessage) {
+                        updateStatus("No message found");
                         return;
                     }
 
-                    // Check if we've reached the maximum number of continuations
-                    const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
-                    const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
-                    if (currentCount >= maxContinues) {
-                        updateStatus(`Max continues (${maxContinues}) reached`);
-                        return;
-                    }
+                    // Step 2: Get current content and check stability
+                    const currentContent = lastMessage.textContent || '';
 
-                    // We've met all criteria - send continue command
-                    log("All conditions met for continuing message");
-                    updateStatus("Continuing...");
-
-                    // Send the continue command and only proceed if it was successful
-                    const continueSuccess = sendContinueCommandSimple();
-                    
-                    // Only update tracking variables if we actually sent the message
-                    if (continueSuccess) {
-                        lastContinueTime = currentTime;
-                        continueAttempts++;
-                        stableCount = 0;
+                    // Debug log to help diagnose Chinese character detection issues
+                    if (config.debugMode) {
+                        console.log("===== Message Content Debugging =====");
+                        console.log(`Raw message content (${currentContent.length} chars):`, currentContent);
                         
-                        // Note: Counter is now updated directly in sendContinueCommandSimple
-                        // No need to update it here to avoid double-counting
-                    } else {
-                        log("Continue command failed to send");
-                        // Don't reset stableCount so we can try again on next iteration
+                        // Check for specific Chinese phrases
+                        const chinesePhrases = ['已完成全部', '已全部完成', '已全部'];
+                        chinesePhrases.forEach(phrase => {
+                            const includes = currentContent.includes(phrase);
+                            console.log(`Contains '${phrase}': ${includes}`);
+                            
+                            // Additional check with UTF-16 code points
+                            const phrasePoints = Array.from(phrase).map(c => c.charCodeAt(0).toString(16));
+                            const contentPoints = Array.from(currentContent).map(c => c.charCodeAt(0).toString(16));
+                            console.log(`Phrase '${phrase}' code points:`, phrasePoints);
+                            
+                            // Check for the phrase in different parts of the message
+                            if (currentContent.length > 200) {
+                                const start = currentContent.substring(0, 100);
+                                const middle = currentContent.substring(Math.floor(currentContent.length/2)-50, Math.floor(currentContent.length/2)+50);
+                                const end = currentContent.substring(currentContent.length-100);
+                                console.log(`Start contains '${phrase}': ${start.includes(phrase)}`);
+                                console.log(`Middle contains '${phrase}': ${middle.includes(phrase)}`);
+                                console.log(`End contains '${phrase}': ${end.includes(phrase)}`);
+                            }
+                        });
                     }
-                    return;
-                }
 
-                // Alternative way to detect when to continue: if content has been stable
-                // for a long time (10 seconds), try continuing regardless
-                if (contentStable && (currentTime - lastMessageTime > 10000)) {
-                    const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
-                    const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
-                    if (shouldContinueMessage(currentContent)) {
+                    // Check if content has changed
+                    if (currentContent !== lastMessageContent) {
+                        log("Content changed, resetting stability counter");
+                        lastMessageContent = currentContent;
+                        lastMessageTime = currentTime;
+                        stableCount = 0;
+                        return;
+                    }
+
+                    // Content is unchanged, increment stability counter
+                    stableCount++;
+
+                    // Update status to show we're checking stability
+                    updateStatus(`Content stable (${stableCount}/3)`);
+
+                    // Step 3: Check if content is stable for enough time AND input is enabled
+                    const contentStable = stableCount >= 3;
+                    const inputEnabled = !isInputDisabled();
+
+                    // If input is enabled and content has been stable, we can consider continuing
+                    if (inputEnabled && contentStable) {
+                        // Step 4: Check if we should continue this message
+                        if (!shouldContinueMessage(currentContent)) {
+                            updateStatus("Message complete");
+                            return;
+                        }
+
+                        // Check if we've reached the maximum number of continuations
+                        const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+                        const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
                         if (currentCount >= maxContinues) {
                             updateStatus(`Max continues (${maxContinues}) reached`);
                             return;
                         }
-                        
-                        log("Content stable for 10+ seconds, attempting continue");
-                        updateStatus("Long stable, continuing...");
+
+                        // We've met all criteria - send continue command
+                        log("All conditions met for continuing message");
+                        updateStatus("Continuing...");
+
+                        // Send the continue command and only proceed if it was successful
                         const continueSuccess = sendContinueCommandSimple();
                         
                         // Only update tracking variables if we actually sent the message
@@ -1112,17 +1183,50 @@
                             lastContinueTime = currentTime;
                             continueAttempts++;
                             stableCount = 0;
+                            
+                            // Note: Counter is now updated directly in sendContinueCommandSimple
+                            // No need to update it here to avoid double-counting
                         } else {
                             log("Continue command failed to send");
                             // Don't reset stableCount so we can try again on next iteration
                         }
-                    } else {
-                        updateStatus("Message appears complete");
+                        return;
                     }
+
+                    // Alternative way to detect when to continue: if content has been stable
+                    // for a long time (10 seconds), try continuing regardless
+                    if (contentStable && (currentTime - lastMessageTime > 10000)) {
+                        const maxContinues = parseInt(localStorage.getItem('chatgpt-auto-continue-max') || config.maxContinues, 10);
+                        const currentCount = parseInt(localStorage.getItem('chatgpt-auto-continue-count') || '0', 10);
+                        if (shouldContinueMessage(currentContent)) {
+                            if (currentCount >= maxContinues) {
+                                updateStatus(`Max continues (${maxContinues}) reached`);
+                                return;
+                            }
+                            
+                            log("Content stable for 10+ seconds, attempting continue");
+                            updateStatus("Long stable, continuing...");
+                            const continueSuccess = sendContinueCommandSimple();
+                            
+                            // Only update tracking variables if we actually sent the message
+                            if (continueSuccess) {
+                                lastContinueTime = currentTime;
+                                continueAttempts++;
+                                stableCount = 0;
+                            } else {
+                                log("Continue command failed to send");
+                                // Don't reset stableCount so we can try again on next iteration
+                            }
+                        } else {
+                            updateStatus("Message appears complete");
+                        }
+                    }
+
+                } catch (e) {
+                    log(`Error in monitor step 1-4: ${e.message}`);
                 }
 
             } catch (e) {
-                // Only log the error, don't change the UI state to prevent flickering
                 log(`Error in monitor: ${e.message}`);
             }
         }, 1000); // Check every second
@@ -1183,10 +1287,138 @@
         log("Mutation observer set up");
     }
 
+    // Function to detect the current ChatGPT model
+    function getCurrentModel() {
+        try {
+            // First check the specific model selector dropdown button (most reliable)
+            const modelSwitcherButton = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
+            if (modelSwitcherButton) {
+                const buttonText = modelSwitcherButton.textContent || '';
+                log(`Found model switcher button: ${buttonText}`);
+                
+                // Check for specific models in the button text
+                if (buttonText.toLowerCase().includes('o1 pro')) {
+                    return 'o1-pro';
+                } else if (buttonText.toLowerCase().includes('o1')) {
+                    return 'o1';
+                } else if (buttonText.includes('4.5')) {
+                    return 'gpt-4.5';
+                } else if (buttonText.includes('4o')) {
+                    return 'gpt-4o';
+                }
+                
+                // Extract model name after "ChatGPT"
+                const match = buttonText.match(/ChatGPT\s+(.+)/);
+                if (match && match[1]) {
+                    return match[1].trim();
+                }
+            }
+            
+            // First check for direct O1 Pro indicators in the document, which is also reliable
+            const o1ProIndicators = document.querySelectorAll('.inline-flex.flex-col.items-start.justify-start.rounded-2xl');
+            for (const container of o1ProIndicators) {
+                const headerText = container.querySelector('.text-token-text-primary')?.textContent?.trim() ||
+                                  container.querySelector('.font-medium')?.textContent?.trim() ||
+                                  container.querySelector('.text-token-text-secondary')?.textContent?.trim();
+                
+                if (headerText === 'Request for o1 pro mode') {
+                    log('Found O1 Pro mode indicator in document');
+                    return 'o1-pro';
+                }
+            }
+            
+            // Look for model display in other elements as fallback
+            const displays = Array.from(document.querySelectorAll('.font-medium, .text-token-text-primary, h1, h2, h3, h4, .text-token-text-secondary'));
+            for (const display of displays) {
+                const text = display.textContent || '';
+                if (text.includes('ChatGPT')) {
+                    // Extract the model name
+                    log(`Found model display: ${text}`);
+                    const modelText = text.replace('ChatGPT', '').trim();
+                    
+                    // Check for specific models
+                    if (text.toLowerCase().includes('o1 pro') || text.toLowerCase().includes('o1-pro')) {
+                        return 'o1-pro';
+                    } else if (text.toLowerCase().includes('o1')) {
+                        return 'o1';
+                    } else if (text.includes('4.5')) {
+                        return 'gpt-4.5';
+                    } else if (text.includes('4o')) {
+                        return 'gpt-4o';
+                    }
+                    
+                    // Return whatever model name we found
+                    return modelText || 'unknown';
+                }
+            }
+            
+            // If we can't find the model name in the standard display, try looking at the model selector
+            const selectedModel = document.querySelector('[data-state="open"]');
+            if (selectedModel) {
+                const modelText = selectedModel.textContent || '';
+                if (modelText.toLowerCase().includes('o1 pro')) {
+                    return 'o1-pro';
+                }
+            }
+            
+            // Check for O1 Pro progress indicators as a fallback
+            const progressBar = document.querySelector('div[style*="height: 8px"]');
+            const detailsButton = document.querySelector('button:contains("Details")');
+            if (progressBar || detailsButton) {
+                const nearbyText = document.evaluate(
+                    "//div[contains(., 'Request for o1 pro mode')]", 
+                    document, 
+                    null, 
+                    XPathResult.FIRST_ORDERED_NODE_TYPE, 
+                    null
+                ).singleNodeValue;
+                
+                if (nearbyText) {
+                    return 'o1-pro';
+                }
+            }
+            
+            // Default return if we can't determine the model
+            return 'unknown';
+        } catch (error) {
+            log(`Error detecting model: ${error.message}`);
+            return 'unknown';
+        }
+    }
+
     // Function to check if o1-pro mode is processing
     function isO1ProProcessing() {
         try {
-            log("Checking for o1-pro processing");
+            // First, check if we're even using o1-pro model
+            const currentModel = getCurrentModel();
+            
+            // Check specifically for any O1 Pro indicators even if model detection failed
+            const o1ProIndicators = document.querySelectorAll('.inline-flex.flex-col.items-start.justify-start.rounded-2xl');
+            let hasO1ProHeader = false;
+            
+            for (const container of o1ProIndicators) {
+                const headerText = container.querySelector('.text-token-text-primary')?.textContent?.trim() ||
+                                  container.querySelector('.font-medium')?.textContent?.trim() ||
+                                  container.querySelector('.text-token-text-secondary')?.textContent?.trim();
+                
+                if (headerText === 'Request for o1 pro mode') {
+                    hasO1ProHeader = true;
+                    break;
+                }
+            }
+            
+            // Force checking if we find O1 Pro indicators even if model detection failed
+            if (currentModel !== 'o1-pro' && !hasO1ProHeader) {
+                // No need to check for o1-pro processing if we're not using that model
+                log(`Current model is ${currentModel}, not checking for o1-pro processing`);
+                return false;
+            }
+            
+            if (hasO1ProHeader) {
+                log("Found O1 Pro header, checking for processing");
+            } else {
+                log("Model detected as o1-pro, checking for processing");
+            }
             
             // First, find the last assistant message to limit our search scope
             const lastMessage = findLastAssistantMessage();
@@ -1197,26 +1429,31 @@
             
             // Helper function to search within the last message and its parent article
             const findInLastMessageArea = (selector) => {
-                // First try direct children of the message
-                let elements = Array.from(lastMessage.querySelectorAll(selector));
-                
-                // If not found, check the parent article which contains the full "turn"
-                if (elements.length === 0) {
-                    const parentArticle = lastMessage.closest('article');
-                    if (parentArticle) {
-                        elements = Array.from(parentArticle.querySelectorAll(selector));
+                try {
+                    // First try direct children of the message
+                    let elements = Array.from(lastMessage.querySelectorAll(selector));
+                    
+                    // If not found, check the parent article which contains the full "turn"
+                    if (elements.length === 0) {
+                        const parentArticle = lastMessage.closest('article');
+                        if (parentArticle) {
+                            elements = Array.from(parentArticle.querySelectorAll(selector));
+                        }
                     }
+                    
+                    // If still not found, try the entire document (for cases where the UI structure changes)
+                    if (elements.length === 0) {
+                        elements = Array.from(document.querySelectorAll(selector));
+                    }
+                    
+                    // Filter to only visible elements
+                    return elements.filter(el => el.offsetParent !== null);
+                } catch (error) {
+                    log(`Error in findInLastMessageArea: ${error.message}`);
+                    return []; // Return empty array on error
                 }
-                
-                // If still not found, try the entire document (for cases where the UI structure changes)
-                if (elements.length === 0) {
-                    elements = Array.from(document.querySelectorAll(selector));
-                }
-                
-                // Filter to only visible elements
-                return elements.filter(el => el.offsetParent !== null);
             };
-
+            
             // Reset the O1 Pro status if no containers are found or if we have restarted
             if (!window._lastO1Check || Date.now() - window._lastO1Check > 60000) {
                 window._o1ProProgressBarLastSeen = null;
