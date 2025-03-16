@@ -20,7 +20,7 @@
         stabilityChecks: 2,  // Number of checks before considering content stable (reduced)
         stabilityThreshold: 2000, // Time in ms to wait before considering content stable (reduced)
         stuckTimeout: 5000,  // Time to wait before considering the UI stuck
-        debugMode: true,     // Set to true to enable console logging
+        debugMode: false,    // Set to false to disable console logging
         maxContinues: 7      // Maximum number of continue attempts per session
     };
 
@@ -94,7 +94,6 @@
         // Initialize counter if it doesn't exist yet
         if (!localStorage.getItem('chatgpt-auto-continue-count')) {
             localStorage.setItem('chatgpt-auto-continue-count', '0');
-            log("Initialized continue counter to 0");
         }
 
         // Create container
@@ -163,7 +162,6 @@
             if (value < 1) this.value = 1;
             if (value > 100) this.value = 100;
             localStorage.setItem('chatgpt-auto-continue-max', this.value);
-            log(`Max continues set to ${this.value}`);
             
             // Update the display with the new max value
             const maxContinues = parseInt(this.value, 10);
@@ -267,7 +265,6 @@
         checkbox.addEventListener('change', function () {
             localStorage.setItem('chatgpt-auto-continue', this.checked);
             updateSliderStyle();
-            log(`Auto Continue ${this.checked ? 'enabled' : 'disabled'}`);
 
             // Reset continues counter when toggling on
             if (this.checked) {
@@ -280,7 +277,6 @@
                 
                 // Restart monitoring
                 startMonitoring();
-                log("Restarted monitoring");
             }
         });
 
@@ -294,13 +290,10 @@
                 checkbox.dispatchEvent(new Event('change'));
             }
         });
-
-        log("Toggle switch created - default OFF");
     }
 
     // Update the status text
     function updateStatus(message) {
-        log(`Status update: ${message}`);
         const statusElement = document.getElementById('auto-continue-status');
         if (statusElement) {
             statusElement.textContent = message;
@@ -402,7 +395,6 @@
             // to avoid getting stuck in waiting state
             return false;
         } catch (e) {
-            log(`Error checking input disabled: ${e.message}`);
             return false; // Default to not disabled on error
         }
     }
@@ -433,7 +425,6 @@
             // Check for any visible loading indicators
             for (const indicator of indicators) {
                 if (indicator && indicator.offsetParent !== null) {
-                    log(`Generation detected via indicator: ${indicator.className || indicator.tagName}`);
                     return true;
                 }
             }
@@ -442,7 +433,6 @@
             const blinkingElements = document.querySelectorAll('.blinking-cursor, .animate-blink');
             for (const el of blinkingElements) {
                 if (el.offsetParent !== null) {
-                    log('Generation detected via blinking cursor');
                     return true;
                 }
             }
@@ -454,7 +444,6 @@
                 const submitButtons = document.querySelectorAll('button[type="submit"]');
                 for (const btn of submitButtons) {
                     if (btn.offsetParent !== null && btn.disabled) {
-                        log('Generation detected via disabled submit button with disabled input');
                         return true;
                     }
                 }
@@ -463,12 +452,10 @@
                 const formButtons = document.querySelectorAll('form button');
                 for (const btn of formButtons) {
                     if (btn.offsetParent !== null && btn.disabled) {
-                        log('Generation detected via disabled form button with disabled input');
                         return true;
                     }
                 }
 
-                log('Generation detected via disabled input');
                 return true;
             }
 
@@ -483,7 +470,6 @@
                 if (streamingIndicators.length > 0) {
                     for (const indicator of streamingIndicators) {
                         if (indicator.offsetParent !== null) {
-                            log('Generation detected via streaming indicator inside message');
                             return true;
                         }
                     }
@@ -492,7 +478,6 @@
 
             return false;
         } catch (e) {
-            log(`Error in checkIfGenerating: ${e.message}`);
             return false;
         }
     }
@@ -514,7 +499,6 @@
 
                 if (!visibleSpinner) {
                     // No spinners and input is enabled - likely ready
-                    log("Input field is enabled and no spinners - ChatGPT ready");
                     return true;
                 }
             }
@@ -523,20 +507,17 @@
             const errorElements = document.querySelectorAll('[data-error="true"], .error, .text-red-500');
             for (const el of errorElements) {
                 if (el.offsetParent !== null && el.textContent.includes('error')) {
-                    log("Error message visible, ChatGPT not ready");
                     return false;
                 }
             }
 
             // Check if any request is in progress (look for network activity indicators)
             if (checkIfGenerating()) {
-                log("Still generating, ChatGPT not ready");
                 return false;
             }
 
             // Check if the input field is disabled
             if (isInputDisabled()) {
-                log("Input is disabled, ChatGPT not ready");
                 return false;
             }
 
@@ -562,23 +543,17 @@
 
             if (!foundEnabledButton) {
                 // No enabled send button found
-                log("No enabled send button found, ChatGPT might not be ready");
-                // But don't return false here - the input state is more reliable
+                return false;
             }
 
             return true;
         } catch (e) {
-            log(`Error in isChatGPTReady: ${e.message}`);
             return false; // If in doubt, assume not ready
         }
     }
 
     // Enhanced function to find the last assistant message component
     function findLastAssistantMessage() {
-        if (config.debugMode) {
-            console.log("Looking for last assistant message...");
-        }
-        
         // Various selectors to try for finding the message content
         const contentSelectors = [
             '[data-message-author-role="assistant"]:last-child',
@@ -598,25 +573,19 @@
         const byRole = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
         
         if (byRole.length > 0) {
-            log(`Found ${byRole.length} messages by role attribute`);
-            
-            // Filter for visible messages with content
             const visibleMessages = Array.from(byRole).filter(el => 
                 el && el.offsetParent !== null && el.textContent.trim().length > 0
             );
             
             if (visibleMessages.length > 0) {
-                log(`Found ${visibleMessages.length} visible messages by role`);
                 // Get the last visible assistant message
                 const lastAssistantMessage = visibleMessages[visibleMessages.length - 1];
                 
                 // Make sure it's actually an assistant message by checking it's not inside a user message container
                 if (lastAssistantMessage.closest('[data-message-author-role="user"]')) {
-                    log('Last message appears to be inside a user message container - marking as user message');
                     lastAssistantMessage._possibleUserMessage = true;
                 } else if (lastAssistantMessage.parentElement && 
                            lastAssistantMessage.parentElement.closest('[data-message-author-role="user"]')) {
-                    log('Last message has a parent inside a user message container - marking as user message');
                     lastAssistantMessage._possibleUserMessage = true;
                 } else {
                     // Additional check: look at the conversation turn container
@@ -625,7 +594,6 @@
                         // Check if this turn has a "You said:" label
                         const turnLabel = conversationTurn.querySelector('h5.sr-only');
                         if (turnLabel && turnLabel.textContent.includes('You said')) {
-                            log('Found "You said" label in the conversation turn - marking as user message');
                             lastAssistantMessage._possibleUserMessage = true;
                         }
                     }
@@ -643,19 +611,15 @@
             );
             
             if (visibleElements.length > 0) {
-                log(`Found ${visibleElements.length} visible elements with selector: ${selector}`);
-                
                 // Check each element to see if it's actually a user message
                 for (const element of visibleElements) {
                     // Check if this element or any of its parents has the user role attribute
                     if (element.closest('[data-message-author-role="user"]')) {
-                        log(`Element with selector ${selector} is inside a user message - skipping`);
                         element._possibleUserMessage = true;
                     } 
                     // Check if the element contains the "You said:" text which indicates it's a user message
                     else if (element.querySelector('h5.sr-only') && 
                              element.querySelector('h5.sr-only').textContent.includes('You said')) {
-                        log(`Element with selector ${selector} contains 'You said' label - marking as user message`);
                         element._possibleUserMessage = true;
                     }
                     potentialMessages.push(element);
@@ -668,12 +632,10 @@
             // First try to find the most recent assistant message (not a user message)
             const assistantMessages = potentialMessages.filter(el => !el._possibleUserMessage);
             if (assistantMessages.length > 0) {
-                log(`Using the last assistant message from ${assistantMessages.length} potential messages`);
                 return assistantMessages[assistantMessages.length - 1];
             }
             
             // If all are marked as user messages, still return the last one but it will be flagged
-            log(`All potential messages are marked as user messages, using last one anyway`);
             return potentialMessages[potentialMessages.length - 1];
         }
         
@@ -684,14 +646,12 @@
             
             // Check if this is likely a user message
             if (lastMessage.closest('[data-message-author-role="user"]')) {
-                log('Last fallback message is inside a user message - marking as user message');
                 lastMessage._possibleUserMessage = true;
             }
             
             return lastMessage;
         }
         
-        log("No assistant message found using any method");
         return null;
     }
 
@@ -735,19 +695,7 @@
         // we should always continue since we don't want to apply completion checks to user messages
         const lastMessage = findLastAssistantMessage();
         if (lastMessage && lastMessage._possibleUserMessage) {
-            log("Detected as possibly a user message - ignoring completion checks");
             return true; // Always continue for user messages
-        }
-        
-        if (config.debugMode) {
-            console.log("===== Message Content Debugging =====");
-            console.log(`Raw message content (${messageText.length} chars): ${messageText}`);
-            
-            // Debug logging for Chinese phrases
-            for (const phrase of ['已完成全部', '已全部完成', '已全部']) {
-                console.log(`Contains '${phrase}': ${messageText.includes(phrase)}`);
-                console.log(`Phrase '${phrase}' code points:`, [...phrase].map(char => char.codePointAt(0).toString(16)));
-            }
         }
         
         // Check for specific patterns that indicate more content will follow
@@ -766,7 +714,6 @@
         const startsWithListItem = continuationPatterns.some(pattern => pattern.test(lastNonEmptyLine));
         
         if (startsWithListItem) {
-            log(`Detected continuation pattern in last line: "${lastNonEmptyLine.substring(0, 30)}..."`);  
             return true;
         }
         
@@ -776,19 +723,16 @@
         // Check if the last code block is incomplete (no closing ```)
         const lastCodeBlockStart = messageText.lastIndexOf('```');
         if (lastCodeBlockStart > -1 && messageText.indexOf('```', lastCodeBlockStart + 3) === -1) {
-            log('Detected incomplete code block, should continue');
             return true;
         }
         
         // Check for specific keywords that indicate the message is complete
         // First, get all Chinese completion keywords (they need special handling)
         const chineseKeywords = completionKeywords.filter(keyword => /[\u4e00-\u9fa5]/.test(keyword));
-        log(`Using ${chineseKeywords.length} Chinese completion keywords`);
         
         // Check Chinese keywords (without toLowerCase since case doesn't apply to Chinese)
         for (const keyword of chineseKeywords) {
             if (messageText.includes(keyword)) {
-                log(`Found Chinese completion keyword: "${keyword}"`);
                 return false;
             }
         }
@@ -799,7 +743,6 @@
         
         for (const keyword of nonChineseKeywords) {
             if (lowerMessage.includes(keyword.toLowerCase())) {
-                log(`Found completion keyword: "${keyword}"`);
                 return false;
             }
         }
@@ -826,7 +769,6 @@
                         // Check Chinese keywords in paragraphs
                         for (const keyword of chineseKeywords) {
                             if (paragraphText.includes(keyword)) {
-                                log(`Found Chinese completion keyword in paragraph: "${keyword}"`);
                                 return false;
                             }
                         }
@@ -835,7 +777,6 @@
                         const lowerParagraph = paragraphText.toLowerCase();
                         for (const keyword of nonChineseKeywords) {
                             if (lowerParagraph.includes(keyword.toLowerCase())) {
-                                log(`Found completion keyword in paragraph: "${keyword}"`);
                                 return false;
                             }
                         }
@@ -843,24 +784,20 @@
                 }
             }
         } catch (e) {
-            log(`Error checking paragraphs: ${e.message}`);
             // Continue despite error
         }
         
         // If we get to here, the message doesn't appear to be complete yet
-        log("No completion markers found, message should continue");
         return true;
     }
 
     // Improved continue command function - more direct approach
     function sendContinueCommandSimple() {
-        log("Sending continue command");
         updateStatus("Sending continue...");
 
         try {
             // Check if o1-pro is processing - if so, don't even try to send
             if (isO1ProProcessing()) {
-                log("Cannot send continue - o1-pro is still processing");
                 updateStatus("O1 processing, wait");
                 return false;
             }
@@ -878,7 +815,6 @@
             const continueCounter = document.getElementById('auto-continue-counter');
             if (continueCounter) {
                 continueCounter.textContent = `Continues: ${newCount}/${maxContinues}`;
-                log(`Updated continue counter: ${newCount}/${maxContinues}`);
             }
             
             // Find the input field by trying multiple approaches
@@ -902,12 +838,9 @@
             }
 
             if (!inputField) {
-                log("No input field found");
                 updateStatus("No input field found");
                 return false;
             }
-
-            log(`Found input field: ${inputField.tagName || 'contenteditable'}`);
 
             // Clear and set text using the appropriate method
             if (inputField.tagName === 'TEXTAREA') {
@@ -970,8 +903,6 @@
 
                 // If no button found with selectors, look for any button near the input
                 if (!sendButton) {
-                    log("Using proximity search for send button");
-
                     // Get input field position
                     const inputRect = inputField.getBoundingClientRect();
 
@@ -1004,17 +935,13 @@
                 }
 
                 if (!sendButton) {
-                    log("No send button found");
                     updateStatus("No send button found");
                     continueSent = false;
                     return;
                 }
 
-                log(`Found send button: ${sendButton.textContent || 'icon button'}`);
-
                 // Click the button
                 sendButton.click();
-                log("Clicked send button");
                 continueSent = true;
                 
                 // Set a flag to indicate we just sent a continue and need to wait
@@ -1024,7 +951,6 @@
                 // After 5 seconds, clear the waiting flag
                 setTimeout(() => {
                     window._waitingAfterContinue = false;
-                    log("5-second minimum wait completed");
                 }, 5000);
                 
             }, 100); // Short delay before clicking send
@@ -1032,7 +958,6 @@
             return true; // Indicate we initiated the continue process
 
         } catch (e) {
-            log(`Error sending continue: ${e.message}`);
             updateStatus("Error sending continue");
             return false;
         }
@@ -1087,7 +1012,6 @@
                         return;
                     }
                 } catch (error) {
-                    log(`Error checking o1-pro mode: ${error.message}`);
                     // Continue execution despite the error
                 }
 
@@ -1108,37 +1032,8 @@
                     // Step 2: Get current content and check stability
                     const currentContent = lastMessage.textContent || '';
 
-                    // Debug log to help diagnose Chinese character detection issues
-                    if (config.debugMode) {
-                        console.log("===== Message Content Debugging =====");
-                        console.log(`Raw message content (${currentContent.length} chars):`, currentContent);
-                        
-                        // Check for specific Chinese phrases
-                        const chinesePhrases = ['已完成全部', '已全部完成', '已全部'];
-                        chinesePhrases.forEach(phrase => {
-                            const includes = currentContent.includes(phrase);
-                            console.log(`Contains '${phrase}': ${includes}`);
-                            
-                            // Additional check with UTF-16 code points
-                            const phrasePoints = Array.from(phrase).map(c => c.charCodeAt(0).toString(16));
-                            const contentPoints = Array.from(currentContent).map(c => c.charCodeAt(0).toString(16));
-                            console.log(`Phrase '${phrase}' code points:`, phrasePoints);
-                            
-                            // Check for the phrase in different parts of the message
-                            if (currentContent.length > 200) {
-                                const start = currentContent.substring(0, 100);
-                                const middle = currentContent.substring(Math.floor(currentContent.length/2)-50, Math.floor(currentContent.length/2)+50);
-                                const end = currentContent.substring(currentContent.length-100);
-                                console.log(`Start contains '${phrase}': ${start.includes(phrase)}`);
-                                console.log(`Middle contains '${phrase}': ${middle.includes(phrase)}`);
-                                console.log(`End contains '${phrase}': ${end.includes(phrase)}`);
-                            }
-                        });
-                    }
-
                     // Check if content has changed
                     if (currentContent !== lastMessageContent) {
-                        log("Content changed, resetting stability counter");
                         lastMessageContent = currentContent;
                         lastMessageTime = currentTime;
                         stableCount = 0;
@@ -1172,7 +1067,6 @@
                         }
 
                         // We've met all criteria - send continue command
-                        log("All conditions met for continuing message");
                         updateStatus("Continuing...");
 
                         // Send the continue command and only proceed if it was successful
@@ -1183,11 +1077,7 @@
                             lastContinueTime = currentTime;
                             continueAttempts++;
                             stableCount = 0;
-                            
-                            // Note: Counter is now updated directly in sendContinueCommandSimple
-                            // No need to update it here to avoid double-counting
                         } else {
-                            log("Continue command failed to send");
                             // Don't reset stableCount so we can try again on next iteration
                         }
                         return;
@@ -1204,7 +1094,6 @@
                                 return;
                             }
                             
-                            log("Content stable for 10+ seconds, attempting continue");
                             updateStatus("Long stable, continuing...");
                             const continueSuccess = sendContinueCommandSimple();
                             
@@ -1214,7 +1103,6 @@
                                 continueAttempts++;
                                 stableCount = 0;
                             } else {
-                                log("Continue command failed to send");
                                 // Don't reset stableCount so we can try again on next iteration
                             }
                         } else {
@@ -1223,11 +1111,11 @@
                     }
 
                 } catch (e) {
-                    log(`Error in monitor step 1-4: ${e.message}`);
+                    // Continue execution despite the error
                 }
 
             } catch (e) {
-                log(`Error in monitor: ${e.message}`);
+                // Continue execution despite the error
             }
         }, 1000); // Check every second
 
@@ -1240,7 +1128,6 @@
         // Check periodically that the toggle exists
         setInterval(() => {
             if (!document.getElementById('auto-continue-switch-container')) {
-                log("Toggle not found, recreating");
                 createToggleSwitch();
             }
         }, 5000);
@@ -1270,7 +1157,6 @@
                 });
 
                 if (significantChanges) {
-                    log("Significant DOM changes detected, checking state");
                     // Don't need to do anything - the interval will check
                 }
             }
@@ -1294,7 +1180,6 @@
             const modelSwitcherButton = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
             if (modelSwitcherButton) {
                 const buttonText = modelSwitcherButton.textContent || '';
-                log(`Found model switcher button: ${buttonText}`);
                 
                 // Check for specific models in the button text
                 if (buttonText.toLowerCase().includes('o1 pro')) {
@@ -1316,15 +1201,22 @@
             
             // First check for direct O1 Pro indicators in the document, which is also reliable
             const o1ProIndicators = document.querySelectorAll('.inline-flex.flex-col.items-start.justify-start.rounded-2xl');
+            let hasO1ProHeader = false;
+            
             for (const container of o1ProIndicators) {
                 const headerText = container.querySelector('.text-token-text-primary')?.textContent?.trim() ||
                                   container.querySelector('.font-medium')?.textContent?.trim() ||
                                   container.querySelector('.text-token-text-secondary')?.textContent?.trim();
                 
                 if (headerText === 'Request for o1 pro mode') {
-                    log('Found O1 Pro mode indicator in document');
-                    return 'o1-pro';
+                    hasO1ProHeader = true;
+                    break;
                 }
+            }
+            
+            // Force checking if we find O1 Pro indicators even if model detection failed
+            if (hasO1ProHeader) {
+                return 'o1-pro';
             }
             
             // Look for model display in other elements as fallback
@@ -1333,7 +1225,6 @@
                 const text = display.textContent || '';
                 if (text.includes('ChatGPT')) {
                     // Extract the model name
-                    log(`Found model display: ${text}`);
                     const modelText = text.replace('ChatGPT', '').trim();
                     
                     // Check for specific models
@@ -1381,7 +1272,6 @@
             // Default return if we can't determine the model
             return 'unknown';
         } catch (error) {
-            log(`Error detecting model: ${error.message}`);
             return 'unknown';
         }
     }
@@ -1410,20 +1300,19 @@
             // Force checking if we find O1 Pro indicators even if model detection failed
             if (currentModel !== 'o1-pro' && !hasO1ProHeader) {
                 // No need to check for o1-pro processing if we're not using that model
-                log(`Current model is ${currentModel}, not checking for o1-pro processing`);
                 return false;
             }
             
             if (hasO1ProHeader) {
-                log("Found O1 Pro header, checking for processing");
+                // Found O1 Pro header, checking for processing
             } else {
-                log("Model detected as o1-pro, checking for processing");
+                // Model detected as o1-pro, checking for processing
             }
             
             // First, find the last assistant message to limit our search scope
             const lastMessage = findLastAssistantMessage();
             if (!lastMessage) {
-                log("No last message found to check for o1-pro processing");
+                // No last message found to check for o1-pro processing
                 return false;
             }
             
@@ -1449,7 +1338,6 @@
                     // Filter to only visible elements
                     return elements.filter(el => el.offsetParent !== null);
                 } catch (error) {
-                    log(`Error in findInLastMessageArea: ${error.message}`);
                     return []; // Return empty array on error
                 }
             };
@@ -1457,14 +1345,11 @@
             // Reset the O1 Pro status if no containers are found or if we have restarted
             if (!window._lastO1Check || Date.now() - window._lastO1Check > 60000) {
                 window._o1ProProgressBarLastSeen = null;
-                log("Resetting O1 Pro status due to long period without checks");
             }
             window._lastO1Check = Date.now();
 
             // Find all o1 pro mode containers
             const containers = findInLastMessageArea('.inline-flex.flex-col.items-start.justify-start.rounded-2xl');
-            
-            log(`Found ${containers.length} potential o1-pro containers`);
             
             // No containers means no O1 Pro processing
             if (containers.length === 0) {
@@ -1485,14 +1370,12 @@
                 
                 if (headerText === 'Request for o1 pro mode') {
                     foundO1ProContainer = true;
-                    log("Found o1-pro container with header text");
                     
                     // Look for the progress bar container with specific height
                     const progressBarContainer = container.querySelector('div[style*="height: 8px"]');
                     
                     // If we find a progress bar, it means processing is still ongoing
                     if (progressBarContainer) {
-                        log("Found active o1-pro mode progress bar");
                         // Reset the timestamp when progress bar disappears
                         window._o1ProProgressBarLastSeen = Date.now();
                         foundActiveProgressBar = true;
@@ -1504,7 +1387,6 @@
                     // If no progress bar but has Details button, still processing
                     const detailsButton = container.querySelector('button');
                     if (detailsButton && detailsButton.textContent?.trim() === 'Details') {
-                        log("Found 'Details' button in o1-pro component");
                         foundActiveDetailsButton = true;
                         
                         // Exit early - we found an active Details button
@@ -1520,12 +1402,11 @@
                     // Check if it's been less than 10 seconds since the progress bar disappeared
                     const timeSinceProgressBarDisappeared = Date.now() - window._o1ProProgressBarLastSeen;
                     if (timeSinceProgressBarDisappeared < 10000) {
-                        log(`Waiting for o1-pro content to finish (${Math.round((10000 - timeSinceProgressBarDisappeared) / 1000)}s remaining)`);
-                        return true; // Still treat as processing during the waiting period
+                        // Still treat as processing during the waiting period
+                        return true;
                     }
                     
                     // If it's been more than 10 seconds, reset the timestamp and allow continuing
-                    log("10-second wait after o1-pro progress bar disappeared completed");
                     window._o1ProProgressBarLastSeen = null;
                 }
             } else if (!foundO1ProContainer) {
@@ -1533,10 +1414,8 @@
                 window._o1ProProgressBarLastSeen = null;
             }
             
-            log("No active o1-pro processing indicators found");
             return false;
         } catch (e) {
-            log(`Error checking o1-pro mode: ${e.message}`);
             return false; // Default to not in o1-pro mode on error
         }
     }
@@ -1571,7 +1450,6 @@
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
             // When page becomes visible again, make sure monitoring is working
-            log("Page visibility changed to visible, refreshing monitoring");
             const toggle = document.getElementById('auto-continue-toggle');
             if (toggle && toggle.checked) {
                 startMonitoring();
